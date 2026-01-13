@@ -10,6 +10,7 @@
     --error-color: #ef4444;
 }
 
+
 body {
     background-color: var(--background-color);
     color: var(--text-color);
@@ -19,12 +20,28 @@ body {
     flex-direction: column;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
     font-weight: 700;
+    color: var(--text-color);
+    /* Ensure headings inherit or rely on primary text color */
+}
+
+/* Force text visibility in cards if bootstrap overrides it */
+.card,
+.card-body,
+.card-title,
+.card-text {
+    color: var(--text-color);
 }
 
 .navbar {
-    background-color: rgba(30, 41, 59, 0.8) !important;
+    background-color: rgba(30, 41, 59, 0.95) !important;
+    /* Slightly more opaque for better readability */
     backdrop-filter: blur(10px);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -41,7 +58,8 @@ h1, h2, h3, h4, h5, h6 {
     transition: color 0.3s ease;
 }
 
-.nav-link:hover, .nav-link.active {
+.nav-link:hover,
+.nav-link.active {
     color: var(--primary-color) !important;
 }
 
@@ -50,6 +68,7 @@ h1, h2, h3, h4, h5, h6 {
     padding: 2rem 0;
     margin-top: auto;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
 }
 
 .card {
@@ -59,16 +78,28 @@ h1, h2, h3, h4, h5, h6 {
     border-radius: 1rem;
 }
 
-.form-control {
-    background-color: rgba(15, 23, 42, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+.form-label {
     color: var(--text-color);
+    /* Ensure labels are visible */
+}
+
+.form-control {
+    background-color: rgba(255, 255, 255, 0.05);
+    /* Slightly lighter for better contrast against dark bg */
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #ffffff !important;
+    /* Force white text */
+}
+
+.form-control::placeholder {
+    color: rgba(255, 255, 255, 0.5) !important;
+    /* Ensure placeholder is visible but muted */
 }
 
 .form-control:focus {
-    background-color: rgba(15, 23, 42, 0.8);
+    background-color: rgba(255, 255, 255, 0.1);
     border-color: var(--primary-color);
-    color: var(--text-color);
+    color: #ffffff !important;
     box-shadow: 0 0 0 0.25rem rgba(99, 102, 241, 0.25);
 }
 
@@ -77,12 +108,15 @@ h1, h2, h3, h4, h5, h6 {
     border: none;
     font-weight: 600;
     padding: 0.75rem 1.5rem;
+    color: #ffffff;
+    /* Ensure button text is white */
     transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .btn-primary:hover {
     transform: translateY(-2px);
     box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.4);
+    color: #ffffff;
 }
 
 .btn-secondary {
@@ -94,5 +128,16 @@ h1, h2, h3, h4, h5, h6 {
 .btn-secondary:hover {
     border-color: var(--text-color);
     color: var(--text-color);
-    background-color: rgba(255,255,255,0.05);
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Ensure links in text are visible */
+a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+a:hover {
+    color: var(--accent-color);
+    text-decoration: underline;
 }
