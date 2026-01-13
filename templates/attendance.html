@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Mark Attendance - Smart Attendance{% endblock %}
+
+{% block head %}
+<style>
+    #video {
+        border-radius: 1rem;
+        width: 100%;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        background-color: #000;
+    }
+
+    .status-box {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        font-weight: 600;
+        margin-top: 1rem;
+    }
+
+    .hidden {
+        display: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-lg-8">
+        <div class="card p-4">
+            <div class="text-center mb-4">
+                <h2>Attendance Verification</h2>
+                <p class="text-muted">Look at the camera and say: <b id="challenge-phrase"
+                        class="text-primary fs-4 mx-2">Blue Sky</b></p>
+            </div>
+
+            <div class="position-relative mb-4">
+                <video id="video" autoplay muted playsinline></video>
+                <canvas id="canvas" class="hidden"></canvas>
+            </div>
+
+            <div class="d-grid gap-2 col-md-6 mx-auto">
+                <button id="start-btn" class="btn btn-primary btn-lg">
+                    <i class="bi bi-mic-fill me-2"></i>Start Verification
+                </button>
+            </div>
+
+            <div id="status" class="status-box text-center"></div>
+
+            <div class="text-center mt-3">
+                <a href="{{ url_for('user.user_home') }}" class="btn btn-link text-decoration-none">Back to
+                    Dashboard</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const statusDiv = document.getElementById('status');
+    const startBtn = document.getElementById('start-btn');
+
+    // 1. Setup Camera
+    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        .then(stream => { video.srcObject = stream; })
+        .catch(err => {
+            console.error("Camera error:", err);
+            statusDiv.innerText = "Error accessing camera: " + err.message;
+            statusDiv.className = "status-box alert alert-danger";
+        });
+
+    // 2. Setup Speech Recognition (Client Side for Speed)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition;
+
+    if (SpeechRecognition) {
+        recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = function () {
+            statusDiv.innerText = "Listening...";
+            statusDiv.className = "status-box alert alert-info";
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Listening...';
+        };
+
+        recognition.onend = function () {
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="bi bi-mic-fill me-2"></i>Start Verification';
+        };
+
+        recognition.onresult = function (event) {
+            const transcript = event.results[0][0].transcript;
+            statusDiv.innerText = `Heard: "${transcript}". Verifying face...`;
+            statusDiv.className = "status-box alert alert-warning";
+            captureAndVerify(transcript);
+        };
+
+        recognition.onerror = function (event) {
+            console.error(event.error);
+            statusDiv.innerText = "Speech recognition error: " + event.error;
+            statusDiv.className = "status-box alert alert-danger";
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="bi bi-mic-fill me-2"></i>Start Verification';
+        };
+    } else {
+        statusDiv.innerText = "Speech Recognition API not supported in this browser.";
+        statusDiv.className = "status-box alert alert-danger";
+        startBtn.disabled = true;
+    }
+
+    startBtn.addEventListener('click', () => {
+        if (recognition) recognition.start();
+    });
+
+    function captureAndVerify(spokenText) {
+        // Draw video to canvas to get image
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const context = canvas.getContext('2d');
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = canvas.toDataURL('image/jpeg', 0.8);
+
+        // Send to Backend
+        fetch('/attendance/mark_attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_id: 1, // Hardcoded for demo, normally from session or logic
+                image: imageData,
+                audio_text: spokenText
+            })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    statusDiv.innerHTML = `<i class="bi bi-check-circle-fill me-2"></i>Success! Score: ${data.score}`;
+                    statusDiv.className = "status-box alert alert-success";
+                } else {
+                    statusDiv.innerHTML = `<i class="bi bi-x-circle-fill me-2"></i>Failed. Score: ${data.score}`;
+                    statusDiv.className = "status-box alert alert-danger";
+                }
+            })
+            .catch(err => {
+                statusDiv.innerText = "Server error: " + err.message;
+                statusDiv.className = "status-box alert alert-danger";
+            });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Smart Attendance{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center align-items-center" style="min-height: 60vh;">
+    <div class="col-md-5 col-lg-4">
+        <div class="card p-4">
+            <h2 class="text-center mb-4">Welcome Back</h2>
+            <form method="post" action="{{ url_for('public.login') }}">
+                <div class="mb-3">
+                    <label for="username" class="form-label">Username</label>
+                    <input type="text" class="form-control" id="username" name="username" required
+                        placeholder="Enter your username">
+                </div>
+                <div class="mb-4">
+                    <label for="password" class="form-label">Password</label>
+                    <input type="password" class="form-control" id="password" name="password" required
+                        placeholder="Enter your password">
+                </div>
+                <div class="d-grid gap-2">
+                    <button type="submit" name="submit" value="submit" class="btn btn-primary">Login</button>
+                    <a href="{{ url_for('public.register') }}" class="btn btn-secondary">Create Account</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
