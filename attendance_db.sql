@@ -2,7 +2,8 @@
 SQLyog Ultimate v11.11 (64 bit)
 MySQL - 8.3.0 : Database - attendance_db
 *********************************************************************
-*/
+*/
+
 
 /*!40101 SET NAMES utf8 */;
 
@@ -39,7 +40,7 @@ CREATE TABLE `attendance_log` (
 DROP TABLE IF EXISTS `login`;
 
 CREATE TABLE `login` (
-  `login_id` int NOT NULL,
+  `login_id` int NOT NULL AUTO_INCREMENT,
   `username` varchar(100) DEFAULT NULL,
   `password` varchar(100) DEFAULT NULL,
   `usertype` varchar(100) DEFAULT NULL,
@@ -56,6 +57,7 @@ CREATE TABLE `user_biometrics` (
   `id` int NOT NULL AUTO_INCREMENT,
   `user_id` int NOT NULL,
   `face_embedding` blob NOT NULL,
+  `voice_embedding` longblob,
   `version` int DEFAULT '1',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -66,9 +68,9 @@ CREATE TABLE `user_biometrics` (
 
 /*Table structure for table `users` */
 
-DROP TABLE IF EXISTS `users`;
+DROP TABLE IF EXISTS `user`;
 
-CREATE TABLE `users` (
+CREATE TABLE `user` (
   `user_id` int NOT NULL AUTO_INCREMENT,
   `login_id` int NOT NULL,
   `full_name` varchar(100) NOT NULL,
