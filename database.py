@@ -1,7 +1,7 @@
 import mysql.connector
 
 user = "root"
-password = "password"
+password = ""
 database = "attendance_db"
 host = "localhost"
 port = 3306

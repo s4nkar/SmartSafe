@@ -15,10 +15,6 @@ app.register_blueprint(user,url_prefix='/user')
 def index():
     return render_template('login.html')
 
-@app.route('/attendance/mark_attendance', methods=['POST'])
-def mark_attendance():
-    
-    return jsonify({"status": "success", "message": "Attendance marked"})
 
 if __name__ == '__main__':
     app.run(debug=True, ssl_context='adhoc') # SSL required for Webcam access

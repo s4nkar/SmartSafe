@@ -9,5 +9,7 @@ def user_home():
 
 @user.route('/mark_attendance_view')
 def mark_attendance_view():
-    return render_template('attendance.html')
+    q = "SELECT * FROM user WHERE login_id = '%s'" %(session['lid'])
+    result = select(q)
+    return render_template('attendance.html',user_id=result[0]["user_id"])
 
