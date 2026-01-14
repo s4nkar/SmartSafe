@@ -6,6 +6,8 @@ import cv2
 import pickle
 from deepface import DeepFace
 
+from werkzeug.security import check_password_hash, generate_password_hash
+
 public=Blueprint('public',__name__)
 
 @public.route('/login',methods=['get','post'])
@@ -14,18 +16,47 @@ def login():
 	if 'submit' in request.form:
 		username=request.form['username']
 		password=request.form['password']
-		q="SELECT usertype, login_id FROM `login` WHERE `username`='%s' AND `password`='%s'"%(username,password)
+		
+		# Fetch by username first
+		q="SELECT * FROM `login` WHERE `username`='%s'"%(username)
 		res=select(q)
+		
 		if res:
-			usertype=res[0]['usertype']
-			login_id=res[0]['login_id']
-			session['lid']=login_id
+			stored_password = res[0]['password']
+			# Check hash or plaintext (legacy)
+			password_ok = False
+			try:
+				if check_password_hash(stored_password, password):
+					password_ok = True
+			except:
+				pass
 			
-			if usertype=='user':
-				return redirect(url_for('user.user_home'))
+			# Fallback for plain text
+			if not password_ok and stored_password == password:
+				password_ok = True
+				
+			if password_ok:
+				usertype=res[0]['usertype']
+				login_id=res[0]['login_id']
+				session['lid']=login_id
+				
+				if usertype=='user':
+					return redirect(url_for('user.user_home'))
+			else:
+				flash("Invalid Password", "danger")
+		else:
+			flash("User not found", "danger")
 
 	return render_template('login.html')
 
+
+@public.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('public.login'))
+
+
+# from werkzeug.security import generate_password_hash # Duplicate removed, imported at top
 
 @public.route('/register', methods=['GET', 'POST'])
 def register():
@@ -34,88 +65,92 @@ def register():
         email = request.form['email']
         username = request.form['username']
         password = request.form['password']
-        
-        # 1. Insert Login
-        q_login = "INSERT INTO `login` VALUES(NULL, '%s', '%s', 'user')" % (username, password)
-        login_id = insert(q_login) 
-        
-        # 2. Insert User (Table name is 'user')
-        q_user = "INSERT INTO `user` VALUES(NULL, '%s', '%s', '%s', current_timestamp)" % (login_id, name, email)
-        user_id = insert(q_user)
-        
-        # 3. Store user_id in session so we know who we are enrolling next
+
+        hashed_password = generate_password_hash(password)
+
+        q_login = """
+        INSERT INTO login (username, password, usertype)
+        VALUES (%s, %s, 'user')
+        """
+        login_id = insert(q_login, (username, hashed_password))
+
+        q_user = """
+        INSERT INTO user (login_id, full_name, email, created_at)
+        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+        """
+        user_id = insert(q_user, (login_id, name, email))
+
         session['enroll_user_id'] = user_id
-        
-        # 4. Redirect to Biometric Enrollment instead of Login
         return redirect(url_for('public.enroll_biometrics'))
 
     return render_template("register.html")
 
+
 # --- 2. New Biometric Enrollment Route ---
 @public.route('/enroll_biometrics', methods=['GET', 'POST'])
 def enroll_biometrics():
-    # Security: Ensure we are in the middle of a registration flow
     user_id = session.get('enroll_user_id')
     if not user_id:
         return redirect(url_for('public.login'))
 
     if request.method == 'POST':
         try:
-            # 1. Get the image and audio from JSON
             data = request.json
-            image_data = data.get('face_image') # Base64 string
-            audio_data = data.get('voice_audio') # Base64 string
-            
+            image_data = data.get('face_image')
+            audio_data = data.get('voice_audio')
+
             if not image_data or not audio_data:
-                return jsonify({"status": "error", "message": "Missing face or voice data"})
+                return jsonify({"status": "error", "message": "Face and voice required"})
 
-            # 2. Convert Base64 -> OpenCV Image
-            encoded_data = image_data.split(',')[1]
-            nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            # ---- Image Decode ----
+            encoded_img = image_data.split(',')[1]
+            img_arr = np.frombuffer(base64.b64decode(encoded_img), np.uint8)
+            img = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
 
-            # Process Audio (Decode Base64 to bytes)
-            # Format usually: "data:audio/wav;base64,UklGRi..."
-            if ',' in audio_data:
-                audio_encoded = audio_data.split(',')[1]
-            else:
-                audio_encoded = audio_data
-            
-            audio_bytes = base64.b64decode(audio_encoded)
+            if img is None:
+                return jsonify({"status": "error", "message": "Invalid image data"})
 
-            # 3. Generate Embedding using DeepFace
-            # We use 'ArcFace' for best balance of speed/accuracy
-            # enforce_detection=True ensures we don't save a wall as a face
-            embedding_objs = DeepFace.represent(
-                img_path=img, 
-                model_name="ArcFace", 
-                enforce_detection=True
+            # ---- Audio Decode ----
+            encoded_audio = audio_data.split(',')[1]
+            audio_bytes = base64.b64decode(encoded_audio)
+
+            if len(audio_bytes) < 8000:
+                return jsonify({"status": "error", "message": "Audio too short"})
+
+            # ---- Face Embedding ----
+            try:
+                face_obj = DeepFace.represent(
+                    img_path=img,
+                    model_name="ArcFace",
+                    enforce_detection=True
+                )
+            except Exception:
+                return jsonify({"status": "error", "message": "No face detected"})
+
+            embedding_blob = pickle.dumps(face_obj[0]["embedding"])
+
+            # ---- Prevent duplicate enrollment ----
+            exists = select_one(
+                "SELECT id FROM user_biometrics WHERE user_id=%s",
+                (user_id,)
             )
-            embedding = embedding_objs[0]["embedding"]
-            
-            # 4. Serialize the embedding to bytes for BLOB storage
-            # We use pickle or simple bytes conversion
-            embedding_blob = pickle.dumps(embedding)
-            
-            # 5. Save to DB
-            import mysql.connector
-            # Note: Hardcoded creds should be replaced with config imports in production
-            conn = mysql.connector.connect(user='root', password='', host='localhost', database='attendance_db', port=3306)
-            cursor = conn.cursor()
-            
-            # Update query to include voice_embedding
-            sql = "INSERT INTO user_biometrics (user_id, face_embedding, voice_embedding) VALUES (%s, %s, %s)"
-            cursor.execute(sql, (user_id, embedding_blob, audio_bytes))
-            conn.commit()
-            conn.close()
+            if exists:
+                return jsonify({"status": "error", "message": "Biometrics already enrolled"})
 
-            # Clear session and finish
+            # ---- Insert ----
+            q = """
+            INSERT INTO user_biometrics (user_id, face_embedding, voice_embedding)
+            VALUES (%s, %s, %s)
+            """
+            insert(q, (user_id, embedding_blob, audio_bytes))
+
             session.pop('enroll_user_id', None)
-            return jsonify({"status": "success", "redirect": url_for('public.login')})
+            return jsonify({"status": "success"})
 
-        except ValueError:
-            return jsonify({"status": "error", "message": "No face detected! Please ensure good lighting."})
         except Exception as e:
             return jsonify({"status": "error", "message": str(e)})
 
-    return render_template("enroll_biometrics.html")
+    import random
+    phrases = ["Red Apple", "Green Grass", "Blue Sky", "Yellow Sun", "Purple Rain"]
+    phrase = random.choice(phrases)
+    return render_template("enroll_biometrics.html", phrase=phrase)

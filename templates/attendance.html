@@ -64,109 +64,220 @@
 
 {% block scripts %}
 <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const recordBtn = document.getElementById('record-btn');
-    const statusDiv = document.getElementById('status');
-    const loading = document.getElementById('loading');
-    const userIdInput = document.getElementById('user_id');
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const recordBtn = document.getElementById("record-btn");
+    const statusDiv = document.getElementById("status");
+    const loading = document.getElementById("loading");
+    const userIdInput = document.getElementById("user_id");
+    const challengePhraseEl = document.querySelector('p b.text-primary');
 
-    let mediaRecorder;
-    let audioChunks = [];
+    let challengeTimer;
+    let timeLeft = 60;
 
-    // 1. Setup Camera
+    let audioContext;
+    let recorder;
+    let input;
+    let audioChunks = []; // Raw PCM data (Float32)
+    let isRecording = false;
+    let pressStartTime = 0;
+
+    // ---------------------------
+    // Fetch dynamic challenge
+    // ---------------------------
+    function fetchChallenge() {
+        fetch("{{ url_for('user.get_challenge') }}")
+            .then(res => res.json())
+            .then(data => {
+                challengePhraseEl.innerText = `"${data.phrase}"`;
+                challengePhraseEl.dataset.phrase = data.phrase;
+                timeLeft = data.expiry_seconds;
+                startTimer();
+                statusDiv.innerText = "";
+                statusDiv.className = "status-box";
+            });
+    }
+
+    function startTimer() {
+        clearInterval(challengeTimer);
+        challengeTimer = setInterval(() => {
+            timeLeft--;
+            if (timeLeft <= 0) {
+                clearInterval(challengeTimer);
+                statusDiv.innerText = "Challenge expired. Fetching new one...";
+                statusDiv.className = "status-box alert alert-warning";
+                fetchChallenge();
+            }
+        }, 1000);
+    }
+
+    fetchChallenge();
+
+    // ---------------------------
+    // Camera Setup (Audio handled on demand or persistence)
+    // ---------------------------
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
         .then(stream => {
             video.srcObject = stream;
-            // Setup Audio Recorder
-            mediaRecorder = new MediaRecorder(stream);
-
-            mediaRecorder.ondataavailable = event => {
-                audioChunks.push(event.data);
-            };
-
-            mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                // Convert to Base64 and Verify
-                verifyAttendance(audioBlob);
-            };
+            // Initialize AudioContext
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            input = audioContext.createMediaStreamSource(stream);
         })
         .catch(err => {
-            console.error("Camera/Mic error:", err);
-            statusDiv.innerText = "Error accessing camera/microphone: " + err.message;
+            statusDiv.innerText = "Camera/Mic access error";
             statusDiv.className = "status-box alert alert-danger";
         });
 
-    // 2. Interaction Logic
-    // Mouse/Touch Down -> Start Recording
+    // ---------------------------
+    // WAV Encoding Helpers
+    // ---------------------------
+    function mergeBuffers(bufferArray, recLength) {
+        const result = new Float32Array(recLength);
+        let offset = 0;
+        for (let i = 0; i < bufferArray.length; i++) {
+            result.set(bufferArray[i], offset);
+            offset += bufferArray[i].length;
+        }
+        return result;
+    }
+
+    function encodeWAV(samples) {
+        // Mono, 16-bit, 44100Hz (or context.sampleRate)
+        const buffer = new ArrayBuffer(44 + samples.length * 2);
+        const view = new DataView(buffer);
+        const sampleRate = audioContext.sampleRate;
+
+        // RIFF chunk descriptor
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + samples.length * 2, true);
+        writeString(view, 8, 'WAVE');
+
+        // fmt sub-chunk
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); // PCM
+        view.setUint16(22, 1, true); // Mono
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true); // BlockAlign
+        view.setUint16(34, 16, true); // BitsPerSample
+
+        // data sub-chunk
+        writeString(view, 36, 'data');
+        view.setUint32(40, samples.length * 2, true);
+
+        // Samples
+        floatTo16BitPCM(view, 44, samples);
+
+        return new Blob([view], { type: 'audio/wav' });
+    }
+
+    function floatTo16BitPCM(output, offset, input) {
+        for (let i = 0; i < input.length; i++, offset += 2) {
+            let s = Math.max(-1, Math.min(1, input[i]));
+            output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+    }
+
+    function writeString(view, offset, string) {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    }
+
+    // ---------------------------
+    // Recording Logic
+    // ---------------------------
     const startRecording = (e) => {
         e.preventDefault();
+        if (timeLeft <= 0 || isRecording) return;
+
+        // Check Audio Context State
+        if (audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+
+        isRecording = true;
+        pressStartTime = Date.now();
+        audioChunks = []; // Reset buffers
+
+        // Create Processor
+        // bufferSize 4096 gives better performance than 1024
+        recorder = audioContext.createScriptProcessor(4096, 1, 1);
+
+        recorder.onaudioprocess = (e) => {
+            if (!isRecording) return;
+            const left = e.inputBuffer.getChannelData(0);
+            audioChunks.push(new Float32Array(left));
+        };
+
+        input.connect(recorder);
+        recorder.connect(audioContext.destination);
+
         statusDiv.innerText = "Listening...";
         statusDiv.className = "status-box alert alert-info";
-        audioChunks = [];
-        if (mediaRecorder && mediaRecorder.state === "inactive") {
-            mediaRecorder.start();
-            recordBtn.classList.add('btn-danger');
-            recordBtn.classList.remove('btn-primary');
-            recordBtn.innerHTML = '<i class="bi bi-mic-fill me-2"></i> Release to Send';
-        }
+
+        recordBtn.classList.replace('btn-primary', 'btn-danger');
+        recordBtn.innerHTML = 'Release to Send';
     };
 
-    // Mouse/Touch Up -> Stop & Verify
     const stopRecording = (e) => {
         e.preventDefault();
-        if (mediaRecorder && mediaRecorder.state === "recording") {
-            mediaRecorder.stop();
-            recordBtn.classList.add('btn-primary');
-            recordBtn.classList.remove('btn-danger');
-            recordBtn.innerHTML = '<i class="bi bi-mic-fill me-2"></i> Hold to Verify';
+        if (!isRecording) return;
 
-            // Show loading
-            loading.style.display = 'block';
-            recordBtn.disabled = true;
-        }
+        isRecording = false;
+
+        // Disconnect
+        recorder.disconnect();
+        // input.disconnect(); // Don't disconnect input, we reuse it
+
+        recordBtn.classList.replace('btn-danger', 'btn-primary');
+        recordBtn.innerHTML = 'Hold to Verify';
+        loading.style.display = 'block';
+        recordBtn.disabled = true;
+
+        // Process Audio
+        const recLength = audioChunks.length * 4096; // Approximate if buffer filled
+        // Safely merge
+        const flatLength = audioChunks.reduce((acc, chunk) => acc + chunk.length, 0);
+        const merged = mergeBuffers(audioChunks, flatLength);
+        const wavBlob = encodeWAV(merged);
+
+        verifyAttendance(wavBlob);
     };
 
     recordBtn.addEventListener('mousedown', startRecording);
     recordBtn.addEventListener('mouseup', stopRecording);
     recordBtn.addEventListener('touchstart', startRecording);
     recordBtn.addEventListener('touchend', stopRecording);
-    // Safety leave
     recordBtn.addEventListener('mouseleave', (e) => {
-        if (mediaRecorder && mediaRecorder.state === "recording") stopRecording(e);
+        if (isRecording) stopRecording(e);
     });
 
+    // ---------------------------
+    // Verification
+    // ---------------------------
     function verifyAttendance(audioBlob) {
-        // Capture Image
+        const pressDuration = Date.now() - pressStartTime;
+        // Threshold lowered to 800ms
+        const livenessPassed = pressDuration >= 800;
+
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        const context = canvas.getContext('2d');
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.getContext('2d').drawImage(video, 0, 0);
         const imageData = canvas.toDataURL('image/jpeg', 0.8);
 
-        // Convert Audio Blob to Base64
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
-            const audioBase64 = reader.result;
-
-            const user_id = userIdInput ? userIdInput.value : 1; // Fallback or logic
-
             fetch("{{ url_for('attendance.mark_attendance') }}", {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    user_id: user_id,
+                    user_id: userIdInput.value,
                     image: imageData,
-                    audio: audioBase64,
-                    // We send the 'text' claim if we want to bypass STT, but here we send audio
-                    // The backend should ideally process it. 
-                    // For now, we still rely on 'audio_text' logic in backend?
-                    // Let's send a flag or placeholder if backend expects 'audio_text'
-                    audio_text: "Blue Sky" // Temporarily hardcoded or we do Client STT + Blob. 
-                    // To do Client STT + Blob is complex. Let's just send Blob and Backend handles it?
-                    // The current backend code expects 'audio_text'. 
-                    // I will update backend to handle 'audio' blob as well.
+                    audio: reader.result,
+                    liveness_passed: livenessPassed
                 })
             })
                 .then(res => res.json())
@@ -174,21 +285,24 @@
                     loading.style.display = 'none';
                     recordBtn.disabled = false;
 
-                    if (data.status === 'success') {
-                        statusDiv.innerHTML = `<i class="bi bi-check-circle-fill me-2"></i>Success! Score: ${data.score}`;
+                    if (data.status === "present" || data.status === "success") {
+                        statusDiv.innerHTML = `✔ Attendance marked (Score: ${data.score})`;
                         statusDiv.className = "status-box alert alert-success";
+                        fetchChallenge();
                     } else {
-                        statusDiv.innerHTML = `<i class="bi bi-x-circle-fill me-2"></i>Failed. ${data.message}`;
+                        statusDiv.innerHTML = `⚠ Verification failed (Score: ${data.score})`;
                         statusDiv.className = "status-box alert alert-danger";
                     }
                 })
                 .catch(err => {
+                    console.error(err);
                     loading.style.display = 'none';
                     recordBtn.disabled = false;
-                    statusDiv.innerText = "Server Error: " + err.message;
+                    statusDiv.innerText = "Server error";
                     statusDiv.className = "status-box alert alert-danger";
                 });
-        }
+        };
     }
 </script>
+
 {% endblock %}

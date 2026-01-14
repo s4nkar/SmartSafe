@@ -1,27 +1,52 @@
-
-
-def calculate_confidence(face_distance, audio_matched, liveness_passed):
+def calculate_confidence(
+    face_similarity: float,
+    face_match: bool,
+    audio_matched: bool,
+    liveness_passed: bool
+):
     """
-    Your custom scoring logic.
-    DeepFace Cosine distance: Lower is better (0 = exact match).
-    Threshold usually around 0.4 for ArcFace/FaceNet.
+    Confidence Scoring (Max = 100, Pass >= 80)
+
+    Face Recognition (Max 60):
+    - Uses cosine similarity from ArcFace (0.0 → 1.0)
+    - Minimum usable similarity = 0.70
+    - 0.70 → 0 points
+    - 0.85+ → 60 points
+    - Linear interpolation in between
+
+    Liveness Check (20):
+    - Passed → +20
+
+    Audio Challenge (20):
+    - Phrase matched → +20
     """
+
     score = 0
-    
-    # 1. Face Match Logic (Inverted distance)
-    # If distance is 0.2, match quality is roughly 80%
-    face_score = max(0, (1.0 - face_distance) * 100)
-    
-    if face_distance < 0.4: # Hard threshold for "Is this the person?"
-        score += 50
-        # Bonus for high accuracy
-        if face_distance < 0.2:
-            score += 10
-    
-    # 2. Liveness/Audio Logic
+
+    # -----------------------------
+    # 1. Face similarity score
+    # -----------------------------
+    FACE_MIN = 0.70
+    FACE_MAX = 0.80
+    FACE_WEIGHT = 60
+
+    if face_match and face_similarity >= FACE_MIN:
+        if face_similarity >= FACE_MAX:
+            score += FACE_WEIGHT
+        else:
+            normalized = (face_similarity - FACE_MIN) / (FACE_MAX - FACE_MIN)
+            score += int(normalized * FACE_WEIGHT)
+
+    # -----------------------------
+    # 2. Liveness score
+    # -----------------------------
     if liveness_passed:
         score += 20
+
+    # -----------------------------
+    # 3. Audio challenge score
+    # -----------------------------
     if audio_matched:
         score += 20
-        
+
     return score

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Attendance History - Smart Attendance{% endblock %}
+
+{% block content %}
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Your Attendance History</h2>
+            <a href="{{ url_for('user.user_home') }}" class="btn btn-outline-light">Back to Dashboard</a>
+        </div>
+
+        <div class="card bg-dark text-white">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th scope="col">#</th>
+                                <th scope="col">Date & Time</th>
+                                <th scope="col">Confidence (Face)</th>
+                                <th scope="col">Method Details</th>
+                                <th scope="col">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if logs %}
+                            {% for log in logs %}
+                            <tr>
+                                <th scope="row">{{ loop.index }}</th>
+                                <td>{{ log.check_in_time }}</td>
+                                <td>
+                                    {% if log.confidence_score >= 80 %}
+                                    <span class="text-success fw-bold">{{ log.confidence_score }}%</span>
+                                    {% else %}
+                                    <span class="text-danger fw-bold">{{ log.confidence_score }}%</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <small class="text-muted">{{ log.method_details }}</small>
+                                </td>
+                                <td>
+                                    {% if log.status == 'success' %}
+                                    <span class="badge bg-success">Passed</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">Failed</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted">No attendance records found.</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

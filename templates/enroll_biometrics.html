@@ -10,18 +10,21 @@
                 <h4>Step 2: Biometric Enrollment</h4>
             </div>
             <div class="card-body">
-                <p class="text-muted">We need both your face and voice to secure your account.</p>
+                <p class="text-muted">
+                    We need your face and a short voice sample to secure your account.
+                </p>
 
                 <div class="row">
                     <!-- Face Section -->
                     <div class="col-md-6 border-end">
                         <h5>1. Face Scan</h5>
                         <div class="position-relative d-inline-block mt-2">
-                            <video id="video" width="100%" height="auto" autoplay muted
-                                style="border-radius: 10px; border: 2px solid #ddd; max-width: 400px;"></video>
+                            <video id="video" autoplay muted playsinline
+                                style="border-radius: 10px; border: 2px solid #ddd; max-width: 400px; width:100%;">
+                            </video>
                             <canvas id="canvas" style="display:none;"></canvas>
                         </div>
-                        <p class="small text-muted mt-2">Align your face in the center.</p>
+                        <p class="small text-muted mt-2">Align your face clearly in the center.</p>
                     </div>
 
                     <!-- Voice Section -->
@@ -29,14 +32,19 @@
                         <h5>2. Voice Sample</h5>
                         <div class="mt-4">
                             <i class="bi bi-mic-fill text-primary" style="font-size: 4rem;"></i>
-                            <p class="mt-3">Please say: <b class="text-dark fs-5">"Blue Sky"</b></p>
+                            <p class="mt-3">
+                                Please say clearly:
+                                <b class="text-dark fs-5">"{{ phrase }}"</b>
+                            </p>
 
                             <button id="record-btn" class="btn btn-outline-primary mb-3">
                                 <i class="bi bi-record-circle"></i> Hold to Record
                             </button>
-                            <br>
+
                             <audio id="audio-preview" controls class="d-none w-100"></audio>
-                            <p id="audio-status" class="small text-muted">No audio recorded yet.</p>
+                            <p id="audio-status" class="small text-muted">
+                                No audio recorded yet.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -44,11 +52,15 @@
                 <hr>
 
                 <div class="mt-3">
-                    <p id="status-msg" class="text-info fw-bold">Waiting for inputs...</p>
+                    <p id="status-msg" class="fw-bold text-info">
+                        Waiting for camera and audio…
+                    </p>
+
                     <button id="submit-btn" class="btn btn-lg btn-success px-5" disabled>
                         <i class="bi bi-check-lg"></i> Complete Registration
                     </button>
-                    <div id="loading" class="spinner-border text-primary" role="status" style="display:none;">
+
+                    <div id="loading" class="spinner-border text-primary ms-3" role="status" style="display:none;">
                         <span class="visually-hidden">Processing...</span>
                     </div>
                 </div>
@@ -58,105 +70,122 @@
 </div>
 
 <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const submitBtn = document.getElementById('submit-btn');
-    const recordBtn = document.getElementById('record-btn');
-    const audioPreview = document.getElementById('audio-preview');
-    const audioStatus = document.getElementById('audio-status');
-    const statusMsg = document.getElementById('status-msg');
-    const loading = document.getElementById('loading');
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const recordBtn = document.getElementById("record-btn");
+    const submitBtn = document.getElementById("submit-btn");
+    const audioPreview = document.getElementById("audio-preview");
+    const audioStatus = document.getElementById("audio-status");
+    const statusMsg = document.getElementById("status-msg");
+    const loading = document.getElementById("loading");
 
-    let faceBlob = null; // We will use base64 for simplicity with the existing backend
-    let audioBlob = null;
-    let audioBase64 = null;
     let mediaRecorder;
     let audioChunks = [];
+    let audioBase64 = null;
+    let recordStartTime = 0;
+    let streamReady = false;
 
-    // 1. Access Camera
-    navigator.mediaDevices.getUserMedia({ video: true })
+    // -----------------------------
+    // Camera + Mic Access (single request)
+    // -----------------------------
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
         .then(stream => {
             video.srcObject = stream;
-        })
-        .catch(err => console.error("Camera Error:", err));
-
-    // 2. Access Microphone for Recording
-    navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
             mediaRecorder = new MediaRecorder(stream);
+            streamReady = true;
+            statusMsg.innerText = "Ready. Capture audio to continue.";
 
-            mediaRecorder.ondataavailable = event => {
-                audioChunks.push(event.data);
-            };
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
 
             mediaRecorder.onstop = () => {
-                audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                const audioUrl = URL.createObjectURL(audioBlob);
-                audioPreview.src = audioUrl;
-                audioPreview.classList.remove('d-none');
-                audioStatus.innerText = "Audio recorded!";
-                statusMsg.innerText = "Audio captured. Click Complete to finish.";
-                checkReadiness();
+                const duration = Date.now() - recordStartTime;
+                if (duration < 1500) {
+                    audioStatus.innerText = "Recording too short. Try again.";
+                    audioChunks = [];
+                    return;
+                }
 
-                // Convert to Base64
+                const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+                audioChunks = [];
+
+                audioPreview.src = URL.createObjectURL(audioBlob);
+                audioPreview.classList.remove("d-none");
+                audioStatus.innerText = "Audio recorded successfully.";
+
                 const reader = new FileReader();
                 reader.readAsDataURL(audioBlob);
                 reader.onloadend = () => {
                     audioBase64 = reader.result;
-                }
+                    checkReadiness();
+                };
             };
         })
-        .catch(err => console.error("Mic Error:", err));
+        .catch(err => {
+            statusMsg.innerText = "Camera or microphone access denied.";
+            statusMsg.classList.add("text-danger");
+        });
 
-    // Recording Logic (Hold to Record)
-    recordBtn.addEventListener('mousedown', () => {
+    // -----------------------------
+    // Recording Controls
+    // -----------------------------
+    recordBtn.addEventListener("mousedown", () => {
+        if (!mediaRecorder || mediaRecorder.state !== "inactive") return;
+        recordStartTime = Date.now();
         audioChunks = [];
-        if (mediaRecorder && mediaRecorder.state === "inactive") {
-            mediaRecorder.start();
-            recordBtn.innerHTML = '<i class="bi bi-mic-fill"></i> Recording...';
-            recordBtn.classList.add('active');
-        }
+        mediaRecorder.start();
+        recordBtn.innerHTML = '<i class="bi bi-mic-fill"></i> Recording...';
     });
 
-    recordBtn.addEventListener('mouseup', () => {
+    recordBtn.addEventListener("mouseup", stopRecording);
+    recordBtn.addEventListener("mouseleave", stopRecording);
+
+    recordBtn.addEventListener("touchstart", e => {
+        e.preventDefault();
+        recordBtn.dispatchEvent(new Event("mousedown"));
+    });
+
+    recordBtn.addEventListener("touchend", e => {
+        e.preventDefault();
+        recordBtn.dispatchEvent(new Event("mouseup"));
+    });
+
+    function stopRecording() {
         if (mediaRecorder && mediaRecorder.state === "recording") {
             mediaRecorder.stop();
             recordBtn.innerHTML = '<i class="bi bi-record-circle"></i> Hold to Record';
-            recordBtn.classList.remove('active');
-        }
-    });
-    // Touch support for mobile
-    recordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); recordBtn.dispatchEvent(new Event('mousedown')); });
-    recordBtn.addEventListener('touchend', (e) => { e.preventDefault(); recordBtn.dispatchEvent(new Event('mouseup')); });
-
-
-    function checkReadiness() {
-        if (audioBlob) {
-            submitBtn.disabled = false;
         }
     }
 
-    // 3. Submit All
-    submitBtn.addEventListener('click', () => {
-        submitBtn.style.display = 'none';
-        loading.style.display = 'inline-block';
-        statusMsg.innerText = "Processing biometric data... (This may take a moment)";
+    // -----------------------------
+    // Readiness Check
+    // -----------------------------
+    function checkReadiness() {
+        if (
+            audioBase64 &&
+            streamReady &&
+            video.videoWidth > 0 &&
+            video.videoHeight > 0
+        ) {
+            submitBtn.disabled = false;
+            statusMsg.innerText = "Ready to complete registration.";
+            statusMsg.className = "fw-bold text-success";
+        }
+    }
 
-        // Capture Face Frame
+    // -----------------------------
+    // Submit Enrollment
+    // -----------------------------
+    submitBtn.addEventListener("click", () => {
+        submitBtn.disabled = true;
+        loading.style.display = "inline-block";
+        statusMsg.className = "fw-bold text-info";
+        statusMsg.innerText = "Processing biometric data…";
+
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        const context = canvas.getContext('2d');
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const faceData = canvas.toDataURL('image/jpeg', 0.9);
+        canvas.getContext("2d").drawImage(video, 0, 0);
+        const faceData = canvas.toDataURL("image/jpeg", 0.9);
 
-        if (!audioBase64) {
-            alert("Please record audio first");
-            submitBtn.style.display = 'inline-block';
-            loading.style.display = 'none';
-            return;
-        }
-
-        // Send to Backend
         fetch("{{ url_for('public.enroll_biometrics') }}", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -165,25 +194,25 @@
                 voice_audio: audioBase64
             })
         })
-            .then(response => response.json())
+            .then(res => res.json())
             .then(data => {
-                if (data.status === 'success') {
-                    statusMsg.innerText = "Registration Complete! Redirecting...";
-                    statusMsg.classList.add('text-success');
-                    setTimeout(() => {
-                        window.location.href = data.redirect;
-                    }, 1500);
+                loading.style.display = "none";
+                if (data.status === "success") {
+                    statusMsg.className = "fw-bold text-success";
+                    statusMsg.innerText = "Registration complete. Redirecting…";
+                    setTimeout(() => window.location.href = "{{ url_for('public.login') }}", 1500);
                 } else {
-                    statusMsg.innerText = "Error: " + data.message;
-                    statusMsg.classList.add('text-danger');
-                    submitBtn.style.display = 'inline-block';
-                    loading.style.display = 'none';
+                    submitBtn.disabled = false;
+                    statusMsg.className = "fw-bold text-danger";
+                    statusMsg.innerText = data.message || "Enrollment failed.";
+                    alert("Enrollment failed.");
                 }
             })
-            .catch(err => {
+            .catch(() => {
+                submitBtn.disabled = false;
+                loading.style.display = "none";
+                statusMsg.className = "fw-bold text-danger";
                 statusMsg.innerText = "Server error. Please try again.";
-                submitBtn.style.display = 'inline-block';
-                loading.style.display = 'none';
             });
     });
 </script>
